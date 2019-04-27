@@ -4,3 +4,4 @@
 
 Capstone created for Data Science course provided by Harvardx via Edx | HarvardX: PH125.9x
 
+link for the used data https://archive.ics.uci.edu/ml/datasets/Adult
