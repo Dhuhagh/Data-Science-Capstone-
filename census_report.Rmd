@@ -1,0 +1,255 @@
+---
+title: "Classifying Income of Census US Data With Machine Learning"
+author: "Dhuha Alghanmi"
+date: "3/26/2019"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+# Introduction 
+
+A census is a procedure of systematically acquiring and recording information about the members of a given population. The term is used mostly in connection with national population and housing censuses; other common censuses include agriculture, business, and traffic censuses .
+The US Adult Census dataset is a repository of 48,842 entries provided by the [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/Adult) This data was extracted from the [1994 Census Bureau](https://www.census.gov/en.html) by Ronny Kohavi and Barry Becker (Data Mining and Visualization, Silicon Graphics). The prediction task is to determine whether a person makes over $50K a year using simple machine learning model.
+
+```{r include=FALSE}
+
+library(readr)
+library(rpart)
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(knitr)
+library(magrittr)
+library(printr)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+adult <- read.csv("adult.csv")
+```
+
+first let's look at the srtucture of the data
+
+```{r echo=TRUE }
+str(adult)
+```
+
+### Attribute
+**The Data**
+-age: the age of an individual.
+-- Integer bigger than 0.
+-workclass:: a general term to represent the employment status of an individual.
+--Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked. 
+-fnlwgt: final weight. this is the number of people the census believes
+the entry represents
+--continuous.
+-education:: the highest level of education achieved by an individual.
+--Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acad, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool. 
+-education-num:: the highest level of education achieved in numerical form. 
+-marital-status: Married-civ-spouse, Divorced, etc.
+-occupation:: the general type of occupation of an individual.
+--Tech-support, Craft-repair, Other-service, Sales, etc. 
+-relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried. 
+-race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black. 
+-sex: Female, Male. 
+-capital-gain:: capital gains for an individual.
+-capital-loss:: capital loss for an individual. 
+-hours-per-week:: the hours an individual has reported to work per week 
+-native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, etc.
+
+checking to see if any NA values 
+
+```{r}
+adult %>% anyNA()
+```
+
+For simplicity of this analysis, the weighting factor is discarded. Role in the family can be assessed from gender and marital status. Thus, the following 2 variables are deleted relationship and fnlwgt.
+
+```{r}
+adult$fnlwgt <- NULL
+adult$relationship <- NULL
+```
+
+# Explotory Analysis 
+
+To gain insights about which features would be most helpful for this analysis I plotted a boxplot for all continuous variable 
+
+```{r echo=FALSE}
+p1 <- adult %>% ggplot(aes(income , age, fill= income)) + geom_boxplot(alpha=0.3) +
+  theme(legend.position="none") +
+  scale_fill_brewer(palette="Set1")
+p2 <- adult %>% ggplot(aes(income , hours.per.week,fill= income)) + geom_boxplot(alpha=0.3)+
+  theme(legend.position="none") +
+  scale_fill_brewer(palette="Set1")
+p3 <- adult %>% ggplot(aes(income , education.num,fill= income)) + geom_boxplot(alpha=0.3) +
+  theme(legend.position="none") +
+  scale_fill_brewer(palette="Set1")
+p4 <- adult %>% ggplot(aes(income , capital.gain,fill= income)) + geom_boxplot(alpha=0.3)+
+  theme(legend.position="none") +
+  scale_fill_brewer(palette="Set1")
+p5 <- adult %>% ggplot(aes(income , capital.loss,fill= income)) + geom_boxplot(alpha=0.3)+
+  theme(legend.position="none") +
+  scale_fill_brewer(palette="Set1")
+gridExtra::grid.arrange(p1 , p2 , p3, p4 ,p5, ncol=2)
+
+```
+
+from this graph we can see that all variables can affect the outcome.
+
+```{r echo= FALSE }
+# plot for work class variable comparision 
+adult %>% ggplot(aes(x = workclass ,fill= income)) + geom_bar() + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90))+
+  scale_fill_brewer(palette="Paired")
+
+```
+
+The majority of individuals in the data work in private sector and all workclass seem to have a good chance of earning more than $50K.
+
+```{r echo = FALSE}
+
+# plot for education variable comparision 
+adult %>% ggplot(aes(education)) + geom_bar(aes(fill = income)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90))+
+  scale_fill_brewer(palette="Paired")
+```
+
+The vaiable education represnt the latest education level for indivisuals , which most of indivisuals are high-school graduate. Doctotate , Masters and Profissional-school seems to have the majority of Income higher than 50K income and but for the first grade to high school the chances are less of earning over 50K.
+
+```{r echo= FALSE}
+# plot for occupations variable comparision 
+adult %>% ggplot(aes(x= occupation)) + geom_bar(aes(fill = income ))+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90))+
+  scale_fill_brewer(palette="Paired")
+```
+
+the dataset indivisuals occupation's does not seems uniform.as seen exec-managerial and prof-specialty stand out at having a higher than 50K income oppesite from Farming-fishing and Handlers-cleaners which stand in the lower than 50K income.
+
+```{r echo=FALSE}
+ adult %>% ggplot(aes(adult$sex)) + geom_bar(aes(fill = income ))+
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90))+
+  scale_fill_brewer(palette="Paired")
+```
+
+the individuals are mostly males also the percentage of males who make greater than $50,000 is much greater than the percentage of females that make the same amount.
+
+# Data Partition
+ 
+```{r}
+
+trainIndex <- createDataPartition(adult$income, times=1,p =0.8, list=FALSE)
+
+train <- adult[trainIndex,]
+test <-  adult[-trainIndex,]
+```
+
+splittd the data to 80%  for training the models and 20% for testing. 
+
+# Machine Learning Techniques - Model Fitting 
+
+###Logistic Regression Model
+
+built a logistic regression model to predict the dependent variable “over 50k”, using all of the other variables in the dataset as independent variables. Using the training set to build the model.
+
+```{r echo=TRUE, warning=FALSE}
+censusglm <- glm( income ~ . , family = binomial , data = train )
+summary(censusglm)
+```
+
+all variable seem to be Significant except for native country.
+
+```{r echo=FALSE}
+# confusion matrix
+prob <- predict(censusglm, test , type = 'response')
+pred <- rep('<=50K', length(prob))
+pred[prob>=.5] <- '>50K'
+tb <- table(pred, test$income)
+kable(tb)
+
+```
+
+Computed accuracy : 
+
+```{r echo=FALSE}
+glm_accuracy <- sum(diag(tb))/sum(tb)
+glm_accuracy
+auc_results <- data_frame(Model = "Generalized Linear Model", Accuracy = glm_accuracy)
+
+kable(auc_results,row.names = 0 )
+```
+
+### Decision Tree Model
+
+A classification tree model is created using the rpart package. It is one of the predictive modeling approaches used in statistics, data mining and machine learning. Tree models where the target variable can take a discrete set of values are called classification trees.In decision analysis, a decision tree can be used to visually and explicitly represent decisions and decision making. In data mining, a decision tree describes data (but the resulting classification tree can be an input for decision making).
+
+```{r echo=TRUE}
+censustree <- rpart( income ~ . , method="class", data = train  )
+# tree plot 
+rpart.plot(censustree)
+```
+
+The Primary splits of the first node are  marital.status,capital.gain and education,second node primary splits: capital.gain, education, occupation and hour per week as seen in the decision tree.
+
+```{r}
+censustree$variable.importance
+```
+
+Confusion matrix and auccarcy for the tree model:
+
+```{r echo=FALSE}
+
+t_prob <- predict(censustree , test , type = "class" )
+tb2 <- confusionMatrix(t_prob,test$income)
+tb2
+
+```
+
+```{r echo=FALSE}
+tree_auc <- tb2$overall['Accuracy']
+auc_results <- rbind(auc_results, data.frame(Model = "Decision Tree Model", Accuracy = tree_auc))
+kable(auc_results, row.names = 0 )
+```
+
+
+### Random Forest Model 
+
+Random forests or random decision forests are an ensemble learning method for classification, regression and other tasks that operates by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean prediction (regression) of the individual trees.
+
+```{r}
+censusforest <- randomForest(income ~ . ,data = train,importance = TRUE)
+censusforest
+```
+
+Confusion matrix and auccarcy for the random forest model:
+
+```{r echo=FALSE}
+r_pred <- predict(censusforest , test )
+tb3<- confusionMatrix(r_pred,test$income)
+tb3
+rf_auc <- tb3$overall['Accuracy']
+```
+
+
+# Results and Conclusion 
+
+First I visuialize and analysis of the data that was and performing machine learning algorithims GLM, Decision Tree(CARET)and Random Forest the least accuracy concuctet was 0.8407 for th Caret model and the highest 0.8639435 for the Random Forest Model which is expected beacause the random forest is an ensemble of Decicion Tree.
+
+```{r echo=FALSE}
+auc_results <- rbind(auc_results, data.frame(Model = "Random Forest Model", Accuracy = rf_auc ))
+kable(auc_results,row.names = 0  )
+```
+
+
+\pagebreak
+
+## Refrence
+
+[1] David R., et al. Modern Business Statistics. Cram101 Textbook Reviews, 2017
+[2] Decision Tree Learning.” Wikipedia, Wikimedia Foundation, 11 Apr. 2019, en.wikipedia.org/wiki/Decision_tree_learning.
+[3]“Random Forest.” Wikipedia, Wikimedia Foundation, 9 Apr. 2019, en.wikipedia.org/wiki/Random_forest.
+[4] Lemon, Chet, et al. Predicting If Income Exceeds $50,000 per Year Based on 1994 US Census Data with Simple Classification Techniques. Predicting If Income Exceeds $50,000 per Year Based on 1994 US Census Data with Simple Classification Techniques.
